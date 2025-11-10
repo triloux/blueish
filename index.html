@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Blue Bayer Dither</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --card: #121821;
+      --text: #e5eefc;
+      --muted: #9bb3d1;
+      --accent: #0077ff; 
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .wrap {
+      max-width: 1000px;
+      margin: 24px auto;
+      padding: 0 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
+    }
+
+    h1 {
+      font-weight: 700;
+      letter-spacing: .2px;
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+
+    p {
+      margin: 6px 0 14px;
+      color: var(--muted);
+    }
+
+    .row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+
+    .panel {
+      flex: 1 1 360px;
+      min-width: 300px;
+    }
+
+    canvas,
+    img {
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      background: #0a0a0a;
+    }
+
+    label.button {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: #0c1320;
+      color: var(--text);
+      border: 1px solid #1b2433;
+      cursor: pointer;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    button,
+    .ghost {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 10px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:disabled {
+      opacity: .4;
+      cursor: default;
+    }
+
+    .ghost {
+      background: transparent;
+      border: 1px solid #2b3a52;
+      color: var(--text);
+    }
+
+    .sliders {
+      display: grid;
+      grid-template-columns: 140px 1fr 60px;
+      gap: 8px 12px;
+      align-items: center;
+      margin-top: 14px;
+    }
+
+    .sliders label {
+      color: var(--muted);
+    }
+
+    .sliders input[type="range"] {
+      width: 100%;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    footer {
+      margin-top: 18px;
+      color: #86a2c7;
+      font-size: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Blue Bayer Dither</h1>
+      <p>Upload an image → apply ordered Bayer dithering + contrast/brightness + light film grain → pure-blue monochrome
+        (#0077FF).</p>
+
+      <div class="controls">
+        <label class="button">
+          <input id="file" type="file" accept="image/*" />
+          📤 Choose image
+        </label>
+        <button id="apply" disabled>✨ Apply effect</button>
+        <button id="download" class="ghost" disabled>⬇️ Download PNG</button>
+      </div>
+
+      <div class="sliders">
+        <label>Contrast (+%)</label>
+        <input id="contrast" type="range" min="0" max="100" value="40" />
+        <span class="mono" id="contrastVal">40</span>
+
+        <label>Brightness (+%)</label>
+        <input id="brightness" type="range" min="0" max="50" value="10" />
+        <span class="mono" id="brightnessVal">10</span>
+
+        <label>Grain (0–20)</label>
+        <input id="grain" type="range" min="0" max="20" value="2" />
+        <span class="mono" id="grainVal">2</span>
+
+        <label>Dot Size (px)</label>
+        <input id="dot" type="range" min="1" max="4" value="1" />
+        <span class="mono" id="dotVal">1</span>
+      </div>
+
+      <div class="row" style="margin-top:16px;">
+        <div class="panel">
+          <p>Original</p>
+          <img id="preview" alt="preview" />
+        </div>
+        <div class="panel">
+          <p>Processed</p>
+          <canvas id="out" width="800" height="600"></canvas>
+        </div>
+      </div>
+
+      <footer>All processing runs locally in your browser. No uploads. Bayer 4×4 matrix, blue tint <span
+          class="mono">#0077FF</span>.</footer>
+    </div>
+  </div>
+
+  <script>
+    const fileEl = document.getElementById('file');
+    const preview = document.getElementById('preview');
+    const out = document.getElementById('out');
+    const ctx = out.getContext('2d', { willReadFrequently: true });
+
+    const applyBtn = document.getElementById('apply');
+    const dlBtn = document.getElementById('download');
+
+    const cRange = document.getElementById('contrast');
+    const bRange = document.getElementById('brightness');
+    const gRange = document.getElementById('grain');
+    const dRange = document.getElementById('dot');
+
+    const cVal = document.getElementById('contrastVal');
+    const bVal = document.getElementById('brightnessVal');
+    const gVal = document.getElementById('grainVal');
+    const dVal = document.getElementById('dotVal');
+
+    [cRange, bRange, gRange, dRange].forEach(sl => sl.addEventListener('input', e => {
+      cVal.textContent = cRange.value;
+      bVal.textContent = bRange.value;
+      gVal.textContent = gRange.value;
+      dVal.textContent = dRange.value;
+    }));
+
+    let sourceImageBitmap = null;
+
+    fileEl.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const blobURL = URL.createObjectURL(file);
+      preview.src = blobURL;
+
+      const bmp = await createImageBitmap(file, { colorSpaceConversion: "none" });
+      sourceImageBitmap = bmp;
+
+      // Fit to canvas keeping aspect ratio
+      fitCanvasToImage(bmp);
+      ctx.drawImage(bmp, 0, 0, out.width, out.height);
+      applyBtn.disabled = false;
+      dlBtn.disabled = true;
+    });
+
+    applyBtn.addEventListener('click', () => {
+      if (!sourceImageBitmap) return;
+      fitCanvasToImage(sourceImageBitmap);
+      ctx.drawImage(sourceImageBitmap, 0, 0, out.width, out.height);
+
+      const imgData = ctx.getImageData(0, 0, out.width, out.height);
+      const outData = applyBlueBayerEffect(imgData, {
+        contrast: Number(cRange.value) / 100,    // +0.40 = +40%
+        brightness: Number(bRange.value) / 100,  // +0.10 = +10%
+        grain: Number(gRange.value),           // 0..20
+        dotSize: Number(dRange.value)          // 1..4
+      });
+      ctx.putImageData(outData, 0, 0);
+      dlBtn.disabled = false;
+    });
+
+    dlBtn.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.download = 'blue_bayer_dither.png';
+      a.href = out.toDataURL('image/png');
+      a.click();
+    });
+
+    /** ------- Core pipeline: Ordered Bayer (4×4) + blue monochrome + contrast + brightness + grain ------- **/
+    function applyBlueBayerEffect(imageData, opts) {
+      const { data, width, height } = imageData;
+      const dotSize = Math.max(1, opts.dotSize | 0);
+
+      // Build Bayer 4×4 matrix scaled to 0..255
+      const base = [
+        0, 8, 2, 10,
+        12, 4, 14, 6,
+        3, 11, 1, 9,
+        15, 7, 13, 5
+      ];
+      const bayer = base.map(v => v / 16 * 255);
+
+      // First pass: grayscale luminance
+      const lum = new Uint8ClampedArray(width * height);
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        // sRGB luminance (perceptual)
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        lum[j] = (0.2126 * r + 0.7152 * g + 0.0722 * b) | 0;
+      }
+
+      // Optional: pre-contrast to exaggerate tones before dithering
+      const preContrast = 1 + opts.contrast; // e.g., 1.4
+      const preBright = opts.brightness;     // e.g., 0.1
+      for (let i = 0; i < lum.length; i++) {
+        let v = lum[i] / 255;
+        // contrast around midgray 0.5
+        v = (v - 0.5) * preContrast + 0.5;
+        v = v + preBright;
+        v = Math.min(1, Math.max(0, v));
+        lum[i] = (v * 255) | 0;
+      }
+
+      // Ordered dithering with dotSize tiling
+      const outPixels = new Uint8ClampedArray(data.length);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = y * width + x;
+          const mX = Math.floor(x / dotSize) % 4;
+          const mY = Math.floor(y / dotSize) % 4;
+          const threshold = bayer[mY * 4 + mX];
+          const on = lum[idx] > threshold ? 1 : 0;
+
+          // Pure blue monochrome: map 0→black, 1→#0077FF
+          const r = on ? 0x00 : 0x00;
+          const g = on ? 0x77 : 0x00;
+          const b = on ? 0xFF : 0x00;
+
+          const p = idx * 4;
+          outPixels[p] = r;
+          outPixels[p + 1] = g;
+          outPixels[p + 2] = b;
+          outPixels[p + 3] = 255;
+        }
+      }
+
+      // Light film grain overlay (additive, color-preserving)
+      const grainAmp = opts.grain; // 0..20
+      if (grainAmp > 0) {
+        for (let i = 0; i < outPixels.length; i += 4) {
+          const n = (Math.random() * grainAmp) | 0; // 0..grainAmp
+          outPixels[i] = Math.min(255, outPixels[i] + n);
+          outPixels[i + 1] = Math.min(255, outPixels[i + 1] + n);
+          outPixels[i + 2] = Math.min(255, outPixels[i + 2] + n);
+        }
+      }
+
+      // Post brightness/contrast already handled pre-dither to preserve the pattern.
+      return new ImageData(outPixels, width, height);
+    }
+
+    function fitCanvasToImage(bmp) {
+      const maxW = 1000, maxH = 1000;
+      let w = bmp.width, h = bmp.height;
+      const s = Math.min(maxW / w, maxH / h, 1);
+      w = Math.round(w * s); h = Math.round(h * s);
+      out.width = w; out.height = h;
+    }
+  </script>
+</body>
+
+</html>
