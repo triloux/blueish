@@ -1,5 +1,7 @@
 # 🟦 Blue Bayer Dither — Pure Blue CRT Render Tool
 
+link: https://triloux.github.io/blueish/
+
 Transform images into a **pure-blue monochrome CRT / print-dither aesthetic** — right in the browser.
 
 This tool applies:
